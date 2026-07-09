@@ -1,0 +1,38 @@
+# Node dependencies
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# Build folders (This is what appeared after you ran npm build!)
+dist/
+build/
+.next/
+
+# Environment variables (CRITICAL: Never commit your passwords/keys!)
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Prisma Database files
+*.db
+*.sqlite
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE / Editor folders
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Agent files
+.agent/

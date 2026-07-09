@@ -1,0 +1,284 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Auth & Teams ────────────────────────────────────────────────────────────
+
+model Team {
+  id                    String   @id @default(cuid())
+  name                  String
+  logoPath              String?  // Relative path under MEDIA_PATH for the custom menu logo
+  splashPath            String?  // Relative path under MEDIA_PATH for the custom boot/startup splash screen
+  isPremium             Boolean  @default(false)
+  maxStorage            Float    @default(5368709120) // Default 5 GB in bytes
+  maxDevices            Int      @default(1)          // Maximum allowed registered screens
+  maxIngressMonthly     Float    @default(10737418240) // Default 10 GB in bytes
+  maxEgressMonthly      Float    @default(107374182400) // Default 100 GB in bytes
+  currentIngressMonthly Float    @default(0)
+  currentEgressMonthly  Float    @default(0)
+  billingCycleAnchor    DateTime @default(now())
+  createdAt             DateTime @default(now())
+
+  users      User[]
+  devices    Device[]
+  groups     DeviceGroup[]
+  playlists  Playlist[]
+  content    Content[]
+  grids      DeviceGrid[]
+  widgets    Widget[]
+  egressLogs EgressLog[]
+}
+
+enum Role {
+  SUPER_ADMIN      // Full access across all teams
+  TEAM_ADMIN       // Manages their team: devices, users, content
+  CONTENT_CREATOR  // Creates playlists and uploads content
+  VIEWER           // Read-only dashboard
+}
+
+model User {
+  id           String    @id @default(cuid())
+  name         String
+  email        String    @unique
+  passwordHash String
+  role         Role      @default(VIEWER)
+  teamId       String?
+  team         Team?     @relation(fields: [teamId], references: [id])
+  createdAt    DateTime  @default(now())
+
+  playlists    Playlist[]
+  passwordResets PasswordReset[]
+  assignedDevices Device[]  @relation("UserDevices")
+}
+
+// ─── Devices ─────────────────────────────────────────────────────────────────
+
+enum DeviceStatus {
+  ONLINE
+  OFFLINE
+  WARNING
+}
+
+model Device {
+  id                String       @id @default(cuid())
+  name              String
+  location          String?
+  teamId            String
+  team              Team         @relation(fields: [teamId], references: [id])
+  registrationKey   String       @unique @default(cuid())  // Used by RPi agent to auth
+  screenWidth       Int?
+  screenHeight      Int?
+  ipAddress         String?
+  lastSeen          DateTime?
+  status            DeviceStatus @default(OFFLINE)
+  currentPlaylistId  String?
+  currentPlaylist    Playlist?    @relation(fields: [currentPlaylistId], references: [id])
+  manualPlaylistId   String?      // Preserves manual assignment when scheduler temporarily overrides it
+  widgets            Widget[]
+  agentVersion       String?
+  screenshotUrl     String?      // Last screenshot served from /media/screenshots/
+  screenshotAt      DateTime?    // When the last screenshot was taken
+  cpuUsage          Float?
+  cpuTemp           Float?
+  memUsage          Float?
+  diskUsage         Float?
+  uptime            Int?
+  orientation       String       @default("LANDSCAPE")
+  assignedUsers     User[]       @relation("UserDevices")
+  createdAt         DateTime     @default(now())
+
+  gridId            String?
+  grid              DeviceGrid?  @relation(fields: [gridId], references: [id], onDelete: SetNull)
+  gridRow           Int?
+  gridCol           Int?
+
+  schedules         Schedule[]
+  logs              DeviceLog[]
+  groupMembers      DeviceGroupMember[]
+}
+
+model DeviceGroup {
+  id     String @id @default(cuid())
+  name   String
+  teamId String
+  team   Team   @relation(fields: [teamId], references: [id])
+
+  members   DeviceGroupMember[]
+  schedules Schedule[]
+}
+
+model DeviceGroupMember {
+  deviceId String
+  groupId  String
+  device   Device      @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  group    DeviceGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@id([deviceId, groupId])
+}
+
+// ─── Content & Playlists ─────────────────────────────────────────────────────
+
+enum ContentType {
+  IMAGE      // PNG, JPG, GIF — served from local storage
+  VIDEO      // MP4, MOV — served from local storage
+  SLIDES_URL // Google Slides embed URL
+  CANVA_URL  // Canva "Smart Embed Link"
+  WEB_URL    // Any arbitrary web URL shown in Chromium
+  PDF        // Uploaded PDF presentation (like Canva or PowerPoint export)
+}
+
+enum ScaleMode {
+  FIT
+  FILL
+  STRETCH
+}
+
+model Content {
+  id            String       @id @default(cuid())
+  name          String
+  type          ContentType
+  filePath      String?      // Relative path under MEDIA_PATH for uploaded files
+  url           String?      // For SLIDES_URL / WEB_URL
+  mimeType      String?
+  fileSize      Int?         // Bytes
+  checksum      String?      // SHA-256, used by RPi to skip re-downloads
+  muted         Boolean      @default(true)
+  scale         ScaleMode    @default(FIT)
+  slideDuration Int          @default(5) // Default duration per slide in seconds
+  thumbnailPath String?      // Relative path under MEDIA_PATH for generated thumbnail
+  teamId        String
+  team          Team         @relation(fields: [teamId], references: [id])
+  createdAt     DateTime     @default(now())
+  validFrom     DateTime?
+  validUntil    DateTime?
+
+  playlistItems PlaylistItem[]
+  slideImages   SlideImage[]
+}
+
+model SlideImage {
+  id         String   @id @default(cuid())
+  contentId  String
+  content    Content  @relation(fields: [contentId], references: [id], onDelete: Cascade)
+  filePath   String   // Relative path under MEDIA_PATH for the extracted slide image
+  orderIndex Int      // Slide page order index (0-indexed)
+  createdAt  DateTime @default(now())
+}
+
+
+model Playlist {
+  id        String   @id @default(cuid())
+  name      String
+  teamId    String
+  team      Team     @relation(fields: [teamId], references: [id])
+  createdBy String?
+  creator   User?    @relation(fields: [createdBy], references: [id])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  items           PlaylistItem[]
+  devices         Device[]
+  schedules       Schedule[]
+}
+
+model PlaylistItem {
+  id          String   @id @default(cuid())
+  playlistId  String
+  playlist    Playlist @relation(fields: [playlistId], references: [id], onDelete: Cascade)
+  contentId   String
+  content     Content  @relation(fields: [contentId], references: [id])
+  durationSec Int      @default(10)
+  orderIndex  Int
+  crossfade   Boolean  @default(true)
+
+  @@index([playlistId, orderIndex])
+}
+
+// ─── Scheduling ──────────────────────────────────────────────────────────────
+
+model Schedule {
+  id         String       @id @default(cuid())
+  // Target: either a single device OR a device group (not both)
+  deviceId   String?
+  device     Device?      @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  groupId    String?
+  group      DeviceGroup? @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  playlistId String
+  playlist   Playlist     @relation(fields: [playlistId], references: [id])
+  startTime  String       // "HH:MM" 24h
+  endTime    String       // "HH:MM" 24h
+  daysOfWeek Int[]        // 0=Sun 1=Mon … 6=Sat
+  priority   Int          @default(0) // Higher wins on conflict
+  isActive   Boolean      @default(true)
+  createdAt  DateTime     @default(now())
+}
+
+// ─── Logs ────────────────────────────────────────────────────────────────────
+
+model DeviceLog {
+  id        String   @id @default(cuid())
+  deviceId  String
+  device    Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  level     String   // info | warn | error
+  message   String
+  createdAt DateTime @default(now())
+
+  @@index([deviceId, createdAt])
+}
+
+// ─── Password Reset ──────────────────────────────────────────────────────────
+
+model PasswordReset {
+  id        String    @id @default(cuid())
+  tokenHash String    @unique  // SHA-256 of the actual token sent in the email
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+}
+
+model DeviceGrid {
+  id        String   @id @default(cuid())
+  name      String
+  rows      Int
+  cols      Int
+  teamId    String
+  team      Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  devices   Device[]
+}
+
+model Widget {
+  id        String   @id @default(cuid())
+  name      String
+  type      String   // "CLOCK" | "WEATHER" | "TICKER"
+  position  String   // "TOP_LEFT" | "TOP_RIGHT" | "BOTTOM_LEFT" | "BOTTOM_RIGHT" | "TOP_CENTER" | "BOTTOM_CENTER" | "CENTER" | "TOP_BAR" | "BOTTOM_BAR" | "LEFT_BAR" | "RIGHT_BAR"
+  settings  String   // JSON-serialized settings (e.g., { timezone, city, text, speed, color, fontSize })
+  teamId    String
+  team      Team     @relation(fields: [teamId], references: [id])
+  devices   Device[]
+  createdAt DateTime @default(now())
+}
+
+model EgressLog {
+  id        String   @id @default(cuid())
+  type      String   // "MEDIA" | "SCREENSHOT"
+  bytes     Int      // Size in bytes
+  path      String   // Requested path
+  teamId    String?
+  team      Team?    @relation(fields: [teamId], references: [id])
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+}
+
