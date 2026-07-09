@@ -5,6 +5,10 @@ Raspberry Pi displays from a single web dashboard. Schedule by time and day,
 remote-control devices, preview screenshots, and cache content locally so
 playback continues if the server goes offline.
 
+> [!NOTE]
+> **Enterprise Edition & Managed Hosting Available**
+> A premium version of this platform with advanced enterprise support and hosted configurations is available. For more details or sales inquiries, please contact us at **tableviewmedia@gmail.com**.
+
 ---
 
 ## Stack
